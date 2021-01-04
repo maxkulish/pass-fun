@@ -15,14 +15,18 @@ impl Database {
 
     fn load_or_create() -> Result<Self, Box<dyn Error>> {
         Ok(match File::open(Self::PATH) {
-            Ok(f) => bincode::deserialize_from(f)?,
+            // new: snap usage
+            Ok(f) => bincode::deserialize_from(snap::read::FrameDecoder::new(f))?,
             Err(_) => Default::default(),
         })
     }
 
     fn save(&self) -> Result<(), Box<dyn Error>> {
         let f = File::create(Self::PATH)?;
-        Ok(bincode::serialize_into(f, self)?)
+        Ok(bincode::serialize_into(
+            snap::write::FrameEncoder::new(f), 
+            self,
+        )?)
     }
 
     /// Note: this function performs no locking whatsoever.

@@ -68,6 +68,7 @@ dependencies = [
  "bincode",
  "md5",
  "serde",
+ "snap",
 ]
 
 [[package]]
@@ -107,6 +108,12 @@ dependencies = [
  "quote",
  "syn",
 ]
+
+[[package]]
+name = "snap"
+version = "1.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "98d3306e84bf86710d6cd8b4c9c3b721d5454cc91a603180f8f8cd06cfd317b4"
 
 [[package]]
 name = "syn"
