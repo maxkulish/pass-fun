@@ -1,8 +1,9 @@
-use std::error::Error;
+use std::{error::Error, fmt::Debug, ops::{Range, RangeInclusive}, time::Instant, write};
 use argh::FromArgs;
 use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use std::fs::File;
+use std::fmt;
 
 /// Maps username to passwords
 #[derive(Clone, Default, Serialize, Deserialize)]
@@ -42,6 +43,55 @@ impl Database {
     }
 }
 
+struct Charset(Vec<u8>);
+
+impl<T> From<T> for Charset
+where
+    T: AsRef<str>
+{
+    fn from(t: T) -> Self {
+        Self(t.as_ref().as_bytes().to_vec())
+    }
+}
+
+impl AsRef<[u8]> for Charset {
+    fn as_ref(&self) -> &[u8] {
+        &self.0
+    }
+}
+
+impl Debug for Charset {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for c in &self.0 {
+            let c = *c as char;
+            if c.is_ascii_graphic() {
+                write!(f, "{}", c)?;
+            } else {
+                write!(f, "\\x{:02x}", c as u64)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+impl Charset {
+
+    fn range(&self, output_len: u32) -> Range<u64> {
+        0..(self.0.len() as u64).pow(output_len)
+    }
+
+    fn get_into(&self, i: u64, buf: &mut [u8]) {
+        let n = self.0.len() as u64;
+
+        let mut remain = i;
+        for slot in buf.iter_mut() {
+            let modulo = remain % n;
+            *slot = self.0[modulo as usize];
+            remain = (remain - modulo) / n;
+        }
+    }
+
+}
 
 /// Experiment with passwords.
 #[derive(FromArgs)]
@@ -56,7 +106,13 @@ enum Command {
     AddUser(AddUser),
     ListUsers(ListUsers),
     Auth(Auth),
+    Bruteforce(Bruteforce),
 }
+
+#[derive(FromArgs)]
+/// Try to brute-force user accounts
+#[argh(subcommand, name = "bruteforce")]
+struct Bruteforce {}
 
 #[derive(FromArgs)]
 /// Add a user to the database
@@ -74,7 +130,6 @@ struct AddUser {
 #[argh(subcommand, name = "list-users")]
 struct ListUsers {}
 
-
 #[derive(FromArgs)]
 /// Authenticate as a user
 #[argh(subcommand, name = "auth")]
@@ -85,7 +140,42 @@ struct Auth {
     #[argh(positional)]
     password: String,
 }
+#[derive(Debug)]
+struct BruteforceParams {
+    len_range: RangeInclusive<usize>,
+    charset: Charset,
+}
 
+fn bruteforce() -> Result<(), Box<dyn Error>> {
+    let params = BruteforceParams {
+        len_range: 4..=8,
+        charset: "abcdefghijklmnopqrstuvwxyz0123456789".into(),
+    };
+    println!("{:?}", params);
+
+    let records = Database::with(|db| Ok(db.records.clone()))?;
+    let start_time = Instant::now();
+
+    for len in params.len_range {
+        let mut buf = vec![0u8; len];
+        for i in params.charset.range(buf.len() as _) {
+            params.charset.get_into(i, &mut buf);
+            let hash = md5::compute(&buf);
+
+            for (db_user, db_hash) in &records {
+                if hash.as_ref() == db_hash {
+                    println!(
+                        "[CRACKED in {:?}] user ({}) has password ({})",
+                        start_time.elapsed(),
+                        db_user,
+                        std::str::from_utf8(&buf).unwrap_or("<not utf-8>")
+                    );
+                }
+            }
+        }
+    }
+    Ok(())
+}
 
 fn main() -> Result<(), Box<dyn Error>> {
     let args: Args = argh::from_env();
@@ -119,5 +209,6 @@ fn main() -> Result<(), Box<dyn Error>> {
             }
             Ok(())
         }),
+        Command::Bruteforce(_) => bruteforce(),
     }
 }
