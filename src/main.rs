@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::fmt;
+use rayon::prelude::*;
 
 /// Maps username to passwords
 #[derive(Clone, Default, Serialize, Deserialize)]
@@ -156,23 +157,26 @@ fn bruteforce() -> Result<(), Box<dyn Error>> {
     let records = Database::with(|db| Ok(db.records.clone()))?;
     let start_time = Instant::now();
 
-    for len in params.len_range {
-        let mut buf = vec![0u8; len];
-        for i in params.charset.range(buf.len() as _) {
-            params.charset.get_into(i, &mut buf);
-            let hash = md5::compute(&buf);
+    for len in params.len_range.clone() {
+        params
+            .charset
+            .range(len as _)
+            .into_par_iter()
+            .for_each_with(vec![0u8; len], |mut buf, i| {
+                params.charset.get_into(i, &mut buf);
+                let hash = md5::compute(&buf);
 
-            for (db_user, db_hash) in &records {
-                if hash.as_ref() == db_hash {
-                    println!(
-                        "[CRACKED in {:?}] user ({}) has password ({})",
-                        start_time.elapsed(),
-                        db_user,
-                        std::str::from_utf8(&buf).unwrap_or("<not utf-8>")
-                    );
+                for (db_user, db_hash) in &records {
+                    if hash.as_ref() == db_hash {
+                        println!(
+                            "[CRACKED in {:?}] user ({}) has password ({})",
+                            start_time.elapsed(),
+                            db_user,
+                            std::str::from_utf8(&buf).unwrap_or("<not utf-8>")
+                        );
+                    }
                 }
-            }
-        }
+            })
     }
     Ok(())
 }
